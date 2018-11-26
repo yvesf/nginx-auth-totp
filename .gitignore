@@ -1,0 +1,6 @@
+/target/
+/.idea/
+/rust.iml
+
+# don't care about it now
+/Cargo.lock
