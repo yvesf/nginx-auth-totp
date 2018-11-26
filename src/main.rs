@@ -1,23 +1,18 @@
 #![feature(test)]
-#![feature(convert_id)]
-#![feature(proc_macro_hygiene)]
-#![feature(try_from)]
 #![feature(duration_as_u128)]
-#![feature(libc)]
 
-use std::env;
 use std::sync::Arc;
 use std::thread;
 use std::sync::atomic;
 use std::net::SocketAddr;
 
-extern crate ascii;
-extern crate getopts;
 #[macro_use]
 extern crate log;
 extern crate tokio;
 extern crate tokio_threadpool;
 extern crate tokio_executor;
+extern crate tokio_signal;
+extern crate futures;
 extern crate time;
 extern crate simple_logger;
 extern crate oath;
@@ -32,10 +27,14 @@ extern crate bytes;
 extern crate thread_local;
 extern crate cookie;
 extern crate url;
+extern crate structopt;
 
-use getopts::Options;
+use structopt::StructOpt;
 use log::LogLevel::{Debug, Warn};
 use time::Duration;
+use futures::{Future, Stream};
+use tokio_threadpool::Builder;
+use tokio_executor::enter;
 
 mod auth_handler;
 mod cookie_store;
@@ -43,8 +42,6 @@ mod http_server;
 mod router;
 mod system;
 mod totp;
-
-extern crate libc;
 
 use cookie_store::CookieStore;
 
@@ -54,53 +51,62 @@ pub struct ApplicationState {
     cookie_max_age: Duration,
 }
 
-fn print_usage(program: &str, opts: &Options) {
-    let brief = format!("Usage: {} [options]", program);
-    print!("{}", opts.usage(&brief));
+#[derive(Debug, StructOpt)]
+#[structopt(name = "nginx-auth-totp")]
+struct Opt {
+    #[structopt(short = "l", long = "port", default_value = "127.0.0.1:8080")]
+    addr: SocketAddr,
+    #[structopt(short = "d", long = "debug")]
+    debug: bool,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let program = args[0].clone();
-    let mut opts = Options::new();
-    opts.optopt("l", "port", "Listen address", "LISTEN-ADDR");
-    opts.optflag("d", "debug", "Use loglevel Debug instead of Warn");
-    opts.optflag("h", "help", "print this help menu");
-    let matches = opts.parse(&args[1..]).unwrap_or_else(|f| panic!(f.to_string()));
-
-    if matches.opt_present("h") {
-        print_usage(&program, &opts);
-        return;
-    }
-
-    simple_logger::init_with_level(if matches.opt_present("d") { Debug } else { Warn })
+    let opt = Opt::from_args();
+    simple_logger::init_with_level(if opt.debug { Debug } else { Warn })
         .unwrap_or_else(|_| panic!("Failed to initialize logger"));
 
-
-    let addr = matches.opt_str("l").unwrap_or_else(||"127.0.0.1:8080".to_string());
-    let addr = addr.parse::<SocketAddr>()
-        .unwrap_or_else(|_| panic!("Failed to parse LISTEN-ADDRESS"));
-
-
-    // concurrent eventual consistent hashmap with <cookie-id, timeout>
     let state = ApplicationState { cookie_store: CookieStore::new(), cookie_max_age: Duration::days(1) };
 
     let server_shutdown_condvar = Arc::new(atomic::AtomicBool::new(false));
 
-    let cookie_clean_thread_condvar = server_shutdown_condvar.clone();
-    let cookie_clean_state = state.clone();
-    let cookie_clean_thread = thread::spawn(move || {
-        while !cookie_clean_thread_condvar.load(atomic::Ordering::Relaxed) {
-            thread::sleep(std::time::Duration::from_secs(60));
-            debug!("Clean cookie cache");
-            cookie_clean_state.cookie_store.clean_outdated_cookies();
-        }
-    });
+    let cookie_clean_thread = {
+        let server_shutdown_condvar = server_shutdown_condvar.clone();
+        let state = state.clone();
+        thread::spawn(move || {
+            thread::park_timeout(std::time::Duration::from_secs(10));
+            while !server_shutdown_condvar.load(atomic::Ordering::Relaxed) {
+                info!("Clean cookie cache");
+                state.cookie_store.clean_outdated_cookies();
+                thread::park_timeout(std::time::Duration::from_secs(60));
+            }
+        })
+    };
 
     let auth_handler = auth_handler::AuthHandler::make();
-    http_server::serve(addr, state, auth_handler);
+    let runtime = Builder::new()
+        .name_prefix("httpd-")
+        .after_start(|| {
+            debug!("Start new worker: {}", thread::current().name().unwrap_or("-"));
+            system::initialize_rng_from_time();
+        })
+        .build();
 
+    let program = http_server::serve(opt.addr, state, auth_handler);
+    runtime.spawn(program);
+
+    let ctrl_c_block = tokio_signal::ctrl_c()
+        .flatten_stream().take(1).for_each(|()| {
+        info!("ctrl-c received");
+        Ok(())
+    });
+
+    enter().expect("nested tokio::run")
+        .block_on(ctrl_c_block)
+        .unwrap();
+    runtime.shutdown();
+
+    info!("Waiting for cookie cleanup thread to stop");
     server_shutdown_condvar.store(true, atomic::Ordering::Relaxed);
-    debug!("Waiting for cleanup thread to shutdown");
+    cookie_clean_thread.thread().unpark();
     cookie_clean_thread.join().unwrap();
 }
