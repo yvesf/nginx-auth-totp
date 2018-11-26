@@ -12,6 +12,7 @@ use std::cell::RefCell;
 
 use time;
 use http::{Request, Response, StatusCode, Method};
+use http::response::Builder;
 use tokio::prelude::*;
 use horrorshow;
 use cookie::{Cookie, CookieBuilder};
@@ -55,12 +56,24 @@ pub struct RequestHandler {
     routing_table: router::RoutingTable<Route>,
 }
 
-pub(in request_handler) fn make_response(code: StatusCode, body: String) -> Response<String> {
-    Response::builder().status(code).body(body).unwrap()
+pub trait ResponseBuilderExtra {
+    fn set_defaults(&mut self) -> &mut Self;
+}
+
+impl ResponseBuilderExtra for Builder {
+    fn set_defaults(&mut self) -> &mut Self {
+        self
+            .status(StatusCode::OK)
+            .header(::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header("X-Frame-Options", "DENY")
+    }
 }
 
 pub(in request_handler) fn error_handler_internal(body: String) -> Response<String> {
-    Response::builder().status(StatusCode::INTERNAL_SERVER_ERROR).body(body).unwrap()
+    Response::builder()
+        .set_defaults()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(body).unwrap()
 }
 
 impl HttpHandler<super::ApplicationState> for RequestHandler {
@@ -71,8 +84,8 @@ impl HttpHandler<super::ApplicationState> for RequestHandler {
             Ok((Route::Logout, rest)) => logout(state, &req, rest),
             Ok((Route::Check, rest)) => check(state, &req, rest),
             Err(error) => match error {
-                router::NoMatchingRoute =>
-                    make_response(StatusCode::NOT_FOUND, "Resource not found".to_string()),
+                router::NoMatchingRoute => Response::builder().set_defaults()
+                    .status(StatusCode::NOT_FOUND).body("Resource not found".to_string()).unwrap(),
             }
         }
     }
@@ -111,7 +124,8 @@ fn info<'a>(request_handler: &RequestHandler, state: &super::ApplicationState,
     } else {
         views::info(path_rest)
     };
-    Response::builder().body(view).unwrap()
+    Response::builder().set_defaults()
+        .body(view).unwrap()
 }
 
 fn login<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &'a str,
@@ -127,15 +141,15 @@ fn login<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &
     }
 }
 
+// unimplemented
 fn logout<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &'a str,
 ) -> Response<String> {
     let header_infos = match parse_header_infos(req) {
         Ok(infos) => infos,
         Err(message) => return error_handler_internal(message),
     };
-
-    let body = format!("Rest: {}", path_rest);
-    Response::builder().body(body.to_string()).unwrap()
+    Response::builder().set_defaults()
+        .body(format!("Rest: {}", path_rest)).unwrap()
 }
 
 
@@ -145,9 +159,12 @@ fn check<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &
         Err(message) => return error_handler_internal(message),
     };
     if is_logged_in(&header_infos.cookies, &state.cookie_store) {
-        make_response(StatusCode::OK, "".to_string())
+        Response::builder().set_defaults()
+            .body(Default::default()).unwrap()
     } else {
-        make_response(StatusCode::UNAUTHORIZED, "Cookie expired".to_string())
+        Response::builder().set_defaults()
+            .status(StatusCode::UNAUTHORIZED)
+            .body("Cookie expired".to_string()).unwrap()
     }
 }
 

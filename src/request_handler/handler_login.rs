@@ -14,9 +14,9 @@ use super::*;
 pub(in super) fn GET<'a>(header_infos: &HeaderExtract, state: &ApplicationState, path_rest: &'a str)
                          -> Response<String> {
     if is_logged_in(&header_infos.cookies, &state.cookie_store) {
-        make_response(StatusCode::OK, views::login_is_logged_in())
+        Response::builder().set_defaults().body(views::login_is_logged_in()).unwrap()
     } else {
-        make_response(StatusCode::OK, views::login_login_form(path_rest))
+        Response::builder().set_defaults().body(views::login_login_form(path_rest)).unwrap()
     }
 }
 
@@ -51,10 +51,9 @@ pub(in super) fn POST<'a>(header_infos: &HeaderExtract, state: &ApplicationState
     let redirect = redirect.unwrap_or(Default::default());
 
     if header_infos.totp_secrets.is_empty() {
-        return error_handler_internal("no secrets configured".to_string())
+        return error_handler_internal("no secrets configured".to_string());
     }
 
-    let mut ret = Response::builder();
     if test_secrets(&header_infos.totp_secrets, &token.unwrap()) {
         let cookie_value = state.cookie_store.create_authenticated_cookie();
         let cookie = CookieBuilder::new(COOKIE_NAME, cookie_value.to_string())
@@ -62,10 +61,14 @@ pub(in super) fn POST<'a>(header_infos: &HeaderExtract, state: &ApplicationState
             .path("/")
             .max_age(state.cookie_max_age)
             .finish();
-        ret.header(SET_COOKIE, cookie.to_string());
         warn!("Authenticated user with cookie {}", cookie);
-        ret.body(views::login_auth_success(&redirect)).unwrap()
+        Response::builder()
+            .set_defaults()
+            .header(SET_COOKIE, cookie.to_string())
+            .body(views::login_auth_success(&redirect)).unwrap()
     } else {
-        ret.body(views::login_auth_fail()).unwrap()
+        Response::builder()
+            .set_defaults()
+            .body(views::login_auth_fail()).unwrap()
     }
 }
