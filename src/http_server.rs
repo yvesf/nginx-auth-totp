@@ -47,23 +47,25 @@ pub fn serve<
             let state = state.clone();
 
             let rx_task = rx.and_then(move |req| {
-                let state = state.clone();
                 let state = tl_state.get_or(|| {
-                    debug!("Clone state");
                     Box::new(state.clone())
                 });
                 let handler = tl_handler.get_or(|| {
-                    debug!("Clone handler");
                     Box::new(handler.clone())
                 });
                 info!("{:?} {} {} {:?}", peer_addr, req.method(), req.uri(), req.version());
                 let response = handler.respond(&state, req);
-                Box::new(future::ok(response))
-            });
+                future::ok(response)
+            })
+                // We limit to one http-frame (request-response cycle)
+                // and do not heandle Connection: keep-alive.
+                // Nginx anyway does Connection: close for auth_request.
+                .take(1);
+
             let tx_task = tx.send_all(rx_task)
                 .then(|res| {
-                    if let Err(e) = res {
-                        error!("failed to process connection; error = {:?}", e);
+                    if let Err(r) = res {
+                        error!("ERROR: {:?}", r)
                     }
                     Ok(())
                 });
@@ -88,6 +90,9 @@ impl Encoder for HttpFrame {
 
     fn encode(&mut self, item: Response<String>, dst: &mut BytesMut) -> io::Result<()> {
         use std::fmt::Write;
+
+        let estimated_size = item.headers().len() * 28 + 110 + item.body().len();
+        dst.reserve(estimated_size);
 
         write!(BytesWrite(dst), "\
             HTTP/1.1 {}\r\n\
