@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use time;
 use http::{Request, Response, StatusCode, Method};
 use http::response::Builder;
+use http::header::SET_COOKIE;
 use tokio::prelude::*;
 use horrorshow;
 use cookie::{Cookie, CookieBuilder};
@@ -141,17 +142,23 @@ fn login<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &
     }
 }
 
-// unimplemented
 fn logout<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &'a str,
 ) -> Response<String> {
     let header_infos = match parse_header_infos(req) {
         Ok(infos) => infos,
         Err(message) => return error_handler_internal(message),
     };
-    Response::builder().set_defaults()
-        .body(format!("Rest: {}", path_rest)).unwrap()
-}
 
+    let cookie_delete = CookieBuilder::new(COOKIE_NAME, "")
+        .http_only(true)
+        .path("/")
+        .expires(time::at_utc(time::Timespec::new(0, 0)))
+        .finish();
+
+    Response::builder().set_defaults()
+        .header(SET_COOKIE, cookie_delete.to_string())
+        .body(views::logout()).unwrap()
+}
 
 fn check<'a>(state: &super::ApplicationState, req: &Request<Bytes>, path_rest: &'a str) -> Response<String> {
     let header_infos = match parse_header_infos(req) {
@@ -180,6 +187,9 @@ fn parse_header_infos(req: &Request<Bytes>) -> Result<HeaderExtract, String> {
     for header_value in req.headers().get_all(::http::header::COOKIE) {
         let value = header_value.to_str().or(Err("Failed to read cookie value"))?;
         for cookie_part in value.split("; ") {
+            if cookie_part.is_empty() {
+                continue;
+            }
             let cookie = Cookie::parse(cookie_part).or(Err("Failed to parse cookie value"))?;
             cookies.push(cookie);
         }

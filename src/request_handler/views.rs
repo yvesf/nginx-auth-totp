@@ -61,6 +61,9 @@ pub(in super) fn login_is_logged_in() -> String {
         h1(id = "heading") {
             : "Currently logged in"
         }
+        a(href="logout") {
+            : "Go to logout";
+        }
     })
 }
 
@@ -102,7 +105,6 @@ pub(in super) fn login_auth_success(redirect: &String) -> String {
     })
 }
 
-
 pub(in super) fn login_auth_fail() -> String {
     render_base_template("Login failed", box_html! {
         h1(id = "heading") {
@@ -110,6 +112,17 @@ pub(in super) fn login_auth_fail() -> String {
         }
         a(href="login") {
             : "Try again... "
+        }
+    })
+}
+
+pub(in super) fn logout() -> String {
+    render_base_template("Logout", box_html! {
+        h1(id = "heading") {
+            : "Logout applied"
+        }
+        a(href="login") {
+            : "go to login again..."
         }
     })
 }
