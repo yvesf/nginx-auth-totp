@@ -112,7 +112,7 @@ impl CookieStore {
         let reader = &self.reader;
         let value = reader.get_and(key, |v| v[0]);
 
-        warn!("Reading {} -> {:?}", key.to_string(), value);
+        debug!("Reading {} -> {:?}", key.to_string(), value);
         if value.is_none() {
             false
         } else if value.unwrap() < Self::now_unix_epoch() {

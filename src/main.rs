@@ -36,7 +36,7 @@ use futures::{Future, Stream};
 use tokio_threadpool::Builder;
 use tokio_executor::enter;
 
-mod auth_handler;
+mod request_handler;
 mod cookie_store;
 mod http_server;
 mod router;
@@ -49,6 +49,7 @@ use cookie_store::CookieStore;
 pub struct ApplicationState {
     cookie_store: CookieStore,
     cookie_max_age: Duration,
+    debug: bool,
 }
 
 #[derive(Debug, StructOpt)]
@@ -64,8 +65,14 @@ fn main() {
     let opt = Opt::from_args();
     simple_logger::init_with_level(if opt.debug { Debug } else { Warn })
         .unwrap_or_else(|_| panic!("Failed to initialize logger"));
+    debug!("If you read this message then we're running debug (-d) mode.");
+    debug!("Debug mode is not safe for public accesible instances");
 
-    let state = ApplicationState { cookie_store: CookieStore::new(), cookie_max_age: Duration::days(1) };
+    let state = ApplicationState {
+        cookie_store: CookieStore::new(),
+        cookie_max_age: Duration::days(1),
+        debug: opt.debug,
+    };
 
     let server_shutdown_condvar = Arc::new(atomic::AtomicBool::new(false));
 
@@ -82,7 +89,7 @@ fn main() {
         })
     };
 
-    let auth_handler = auth_handler::AuthHandler::make();
+    let request_handler = request_handler::RequestHandler::make();
     let runtime = Builder::new()
         .name_prefix("httpd-")
         .after_start(|| {
@@ -91,7 +98,7 @@ fn main() {
         })
         .build();
 
-    let program = http_server::serve(opt.addr, state, auth_handler);
+    let program = http_server::serve(opt.addr, state, request_handler);
     runtime.spawn(program);
 
     let ctrl_c_block = tokio_signal::ctrl_c()
