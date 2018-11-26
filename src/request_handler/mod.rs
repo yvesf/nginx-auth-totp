@@ -162,8 +162,10 @@ fn parse_header_infos(req: &Request<Bytes>) -> Result<HeaderExtract, String> {
     let mut cookies = Vec::new();
     for header_value in req.headers().get_all(::http::header::COOKIE) {
         let value = header_value.to_str().or(Err("Failed to read cookie value"))?;
-        let cookie = Cookie::parse(value).or(Err("Failed to parse cookie value"))?;
-        cookies.push(cookie);
+        for cookie_part in value.split("; ") {
+            let cookie = Cookie::parse(cookie_part).or(Err("Failed to parse cookie value"))?;
+            cookies.push(cookie);
+        }
     }
 
     Ok(HeaderExtract { totp_secrets, cookies })
