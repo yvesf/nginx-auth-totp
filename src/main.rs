@@ -1,6 +1,4 @@
-#![feature(test)]
-#![feature(duration_as_u128)]
-
+#![feature(test,integer_atomics,duration_as_u128)]
 use std::sync::Arc;
 use std::thread;
 use std::sync::atomic;
@@ -50,6 +48,7 @@ pub struct ApplicationState {
     cookie_store: CookieStore,
     cookie_max_age: Duration,
     debug: bool,
+    request_slowdown: Arc<atomic::AtomicU64>,
 }
 
 #[derive(Debug, StructOpt)]
@@ -72,6 +71,7 @@ fn main() {
         cookie_store: CookieStore::new(),
         cookie_max_age: Duration::days(1),
         debug: opt.debug,
+        request_slowdown: Arc::new(atomic::AtomicU64::new(0)),
     };
 
     let server_shutdown_condvar = Arc::new(atomic::AtomicBool::new(false));

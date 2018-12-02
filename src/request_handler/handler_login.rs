@@ -1,5 +1,9 @@
+use std::ops::Add;
 use std::io;
 use std::borrow::Cow;
+use std::time;
+use std::thread;
+use std::sync::atomic;
 
 use tokio::prelude::*;
 
@@ -36,6 +40,18 @@ fn test_secrets(secrets: &Vec<&str>, token: &String) -> bool {
 
 pub(in super) fn POST<'a>(header_infos: &HeaderExtract, state: &ApplicationState, req: &Request<Bytes>)
                           -> Response<String> {
+let wait_until = state.request_slowdown.load(atomic::Ordering::Acquire);
+    let now = time::SystemTime::now().duration_since(time::UNIX_EPOCH).unwrap().as_secs();
+
+    let slept = if wait_until > now {
+        let time = wait_until - now;
+        warn!("Sleep {}s", time);
+        thread::sleep(time::Duration::from_secs(time));
+        time
+    } else {
+        0
+    };
+
     let mut token = None;
     let mut redirect = None;
     for (key, val) in form_urlencoded::parse(req.body()) {
@@ -67,6 +83,15 @@ pub(in super) fn POST<'a>(header_infos: &HeaderExtract, state: &ApplicationState
             .header(SET_COOKIE, cookie.to_string())
             .body(views::login_auth_success(&redirect)).unwrap()
     } else {
+        let current_wait = state.request_slowdown.load(atomic::Ordering::Acquire);
+        let wait_until = time::SystemTime::now()
+            .add(time::Duration::from_secs(8))
+            .duration_since(time::UNIX_EPOCH).unwrap()
+            .as_secs();
+        // if this request was already delayed then we double-delay
+        let wait_until = wait_until.max(current_wait + 8 + slept);
+        state.request_slowdown.store(wait_until, atomic::Ordering::Release);
+
         Response::builder()
             .set_defaults()
             .body(views::login_auth_fail()).unwrap()

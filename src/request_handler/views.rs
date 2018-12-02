@@ -17,7 +17,7 @@ fn render_base_template(title: &'static str, page_body: Box<RenderBox>) -> Strin
     }).into_string().unwrap()
 }
 
-pub(in super) fn info_debug<'a>(path_rest: &'a str, cookies: Vec<(String, String)>) -> String {
+pub(in super) fn info_debug<'a>(path_rest: &'a str, cookies: Vec<(String, String)>, wait_until: u64) -> String {
     let path = path_rest.to_string();
     render_base_template("Info (debug)", box_html! {
         h1(id = "heading") {
@@ -32,7 +32,7 @@ pub(in super) fn info_debug<'a>(path_rest: &'a str, cookies: Vec<(String, String
                 th: "Cookie value";
                 th: "Valid until";
             }
-                tbody {
+            tbody {
                 @ for (name, valid_until) in cookies {
                     tr {
                         td: name;
@@ -40,6 +40,11 @@ pub(in super) fn info_debug<'a>(path_rest: &'a str, cookies: Vec<(String, String
                     }
                 }
             }
+        }
+        h2: "Request Slowdown";
+        p {
+            : "Until: ";
+            : wait_until;
         }
     })
 }

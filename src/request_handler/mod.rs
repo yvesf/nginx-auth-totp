@@ -1,5 +1,6 @@
 #![allow(warnings)]
 
+use std::sync::atomic;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::io;
@@ -121,7 +122,8 @@ fn info<'a>(request_handler: &RequestHandler, state: &super::ApplicationState,
         let valid_cookies: Vec<(String, String)> = state.cookie_store.reader
             .map_into(|k, v|
                 (k.to_string(), ftime(v[0] as i64)));
-        views::info_debug(path_rest, valid_cookies)
+        views::info_debug(path_rest, valid_cookies,
+                          state.request_slowdown.load(atomic::Ordering::Acquire))
     } else {
         views::info(path_rest)
     };
